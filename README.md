@@ -35,7 +35,7 @@ The following sampling rates are supported:
 24000 kHz  
 48000 kHz  
 
-MP3 ABR and CBR is supported, with sample rates up to 320kBit/s.
+MP3 ABR and CBR is supported, with bit rates up to 320kBit/s.
 
 ### PWM Generation
 Sound is played with 12 bit accuracy. To support this at up to 48kHz sampling rates, the pico is overclocked to 180MHz
