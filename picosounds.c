@@ -419,28 +419,28 @@ static void changeState(enum sound_state new_state)
 }
 
 void startMusic(uint32_t sample_rate)
-{
-    
+{ 
     enum Event skip = empty;
-    int count = 0;
 
     // Reconfigure the PWM for the new wrap and clock
     getSampleValues(sample_rate, &repeat_shift, &wrap, &mid_point, &fraction);
     pwmChannelReconfigure(&pwm_channel[0], fraction, wrap);
     pwmChannelReconfigure(&pwm_channel[1], fraction, wrap);
 
+    // reset read positions
+    ram_buffer_index = 0;
+    dma_buffer_index = 0;
+
     // Reininitialise the double buffers
     doubleBufferInitialise(&double_buffers, &populateCallback, &current_RAM_Buffer, &current_RAM_length);
 
-    // reset read position of RAM buffer to start
-    ram_buffer_index = 0;
-
-    // Populate the DMA buffers
+    // Populate the first DMA buffer
     populateDmaBuffer();
 
     // Empty the message queue, to avoid processing populate messages
     while(queue_try_remove(&eventQueue, &skip));
 
+    // Populate the second DMA buffer
     populateDmaBuffer();
 
     // Start the first DMA channel in the chain and both PWMs
