@@ -12,7 +12,7 @@ set(CMAKE_CXX_STANDARD 17)
 # Pull in Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(pico-pwm-audio C CXX ASM)
+project(picosounds C CXX ASM)
 
 set(PICO_CXX_ENABLE_EXCEPTIONS 1)
 
@@ -21,8 +21,10 @@ set(PICO_CXX_ENABLE_RTTI 1)
 # Initialise the Pico SDK
 pico_sdk_init()
 
-# Add executable. Default name is the project name, version 0.2
+# Turn off the FatFS LED
+add_definitions(-DNO_PICO_LED)
 
+# Add executable. Default name is the project name, version 0.1
 add_executable(picosounds picosounds.c 
                           pwm_channel.c 
                           debounce_button.c 
@@ -40,6 +42,8 @@ pico_enable_stdio_uart(picosounds 1)
 pico_enable_stdio_usb(picosounds 0)
 
 add_subdirectory(no-OS-FatFS-SD-SPI-RPi-Pico/FatFs_SPI build)
+remove_definitions(-DNO_PICO_LED)
+
 add_subdirectory(picomp3lib/src)
 
 # Add the standard library to the build

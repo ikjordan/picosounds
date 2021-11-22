@@ -16,6 +16,7 @@
  
 #define AUDIO_PIN 18  // Configured for the Maker board 18 left, 19 right
 #define STEREO        // When stereo not enabled, DMA same l and r data to both channels
+#define VOLUME
 
 #ifdef STEREO
 bool play_stereo = true;
@@ -379,6 +380,8 @@ int main(void)
     debounceButtonCreate(&button[0], 20, 40, buttonCallback, true, false);
     debounceButtonCreate(&button[1], 21, 40, buttonCallback, true, false);
     debounceButtonCreate(&button[2], 22, 40, buttonCallback, true, false);
+    
+    // Extra off board button used for development testing
     debounceButtonCreate(&button[3], 14, 40, buttonCallback, false, true);
 
     // Create the event queue
@@ -399,7 +402,7 @@ int main(void)
     fsMount(&mount);
 
     // Start by playing brown noise
-    changeState(brown);
+    changeState(file_1);
 
     /*
      * Main loop Generate noise, handle buttons for volume, parse wav blocks etc
@@ -640,16 +643,19 @@ void buttonCallback(uint gpio_number, enum debounce_event event)
         case 20:
             e = change;
         break;
-
-        case 14:
+#ifdef VOLUME
+        case 21:
             e = increase;
         break;
 
-        case 21:
+        case 22:
             e = decrease;
         break;
 
+        case 14:
+#else
         case 22:
+#endif        
             e = quit;
         break;
     }
