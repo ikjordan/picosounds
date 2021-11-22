@@ -12,11 +12,12 @@
 #include "double_buffer.h"
 #include "colour_noise.h"
 #include "music_file.h"
+#include "config.h"
 
  
 #define AUDIO_PIN 18  // Configured for the Maker board 18 left, 19 right
 #define STEREO        // When stereo not enabled, DMA same l and r data to both channels
-#define VOLUME
+//#define VOLUME
 
 #ifdef STEREO
 bool play_stereo = true;
@@ -58,7 +59,7 @@ static double_buffer double_buffers;
 uint32_t populateCallback(int16_t* buffer, uint32_t len);   // Call back to generate next buffer of sound
 
 // Working buffer for reading from file
-#define CACHE_BUFFER 16000
+#define CACHE_BUFFER 8000
 unsigned char cache_buffer[CACHE_BUFFER];
 
 // Pointer to the currenly in use RAM buffer
@@ -83,20 +84,6 @@ enum Event
     quit = change + 1, 
 }; 
 
-// Range of sound colours and files that can be played
-enum sound_state
-{
-    off = 0,
-    start = off + 1,
-    brown = start,
-    file_1 = brown + 1,
-    file_2 = file_1 + 1,
-    file_3 = file_2 + 1,
-    white = file_3 + 1,
-    pink = white + 1,
-    end = pink + 1
-};
-
 // To convert from 16 bit signed to unsigned
 #define MID_VALUE 0x8000
 
@@ -105,7 +92,8 @@ static inline bool isColour(enum sound_state state) {return (state == white || s
 static inline bool isFile(enum sound_state state) {return (state == file_1 || state == file_2 || state == file_3);}
 
 static void changeState(enum sound_state new_state);
-enum sound_state current_state = off; 
+sound_state current_state = off; 
+uint32_t rgb = 0x0;
 
 // Four buttons
 static debounce_button_data button[4];
@@ -117,8 +105,6 @@ static void populateDmaBuffer(void);
 static void claimDmaChannels(int num_channels);
 static void initDma(int buffer_index, int slice, int chain_index);
 static void dmaInterruptHandler();
-
-static bool getSampleValues(uint sample_rate, uint* shift, uint* wrap, uint* mid_point, float* fraction);
 
 void startMusic(uint32_t sample_rate);
 void stopMusic();
@@ -247,98 +233,6 @@ static void initDma(int buffer_index, int slice, int chain_index)
                           false);
 }
 
-// Determin configuration data, based on sample rate
-static bool getSampleValues(uint sample_rate, uint* shift, uint* wrap, uint* mid_point, float* fraction)
-{
-    bool ret = true;
-
-    switch (sample_rate)
-    {
-        case 11000:
-            *shift = 2;
-            *wrap = 4091;
-            *fraction = 1.0f;
-        break;
-
-        case 22000:
-            *shift = 1;
-            *wrap = 4091;
-            *fraction = 1.0f;
-        break;
-
-        case 11025:
-            *shift = 2;
-            *wrap = 4082;
-            *fraction = 1.0f;
-        break;
-
-        case 22050:
-            *shift = 1;
-            *wrap = 4082;
-            *fraction = 1.0f;
-        break;
-
-        case 44000:
-            *shift = 0;
-            *wrap = 4091;
-            *fraction = 1.0f;
-        break;
-
-        case 44100:
-            *shift = 0;
-            *wrap = 4082;
-            *fraction = 1.0f;
-        break;
-
-        case 8000:
-            *shift = 2;
-            *wrap = 4091;
-            *fraction = 1.375f;
-        break;
-
-        case 16000:
-            *shift = 1;
-            *wrap = 4091;
-            *fraction = 1.375f;
-        break;
-
-        case 32000:
-            *shift = 0;
-            *wrap = 4091;
-            *fraction = 1.375f;
-        break;
-
-        case 12000:
-            *shift = 2;
-            *wrap = 3750;
-            *fraction = 1.0f;
-        break;
-
-        case 24000:
-            *shift = 1;
-            *wrap = 3750;
-            *fraction = 1.0f;
-        break;
-
-        case 48000:
-            *shift = 0;
-            *wrap = 3750;
-            *fraction = 1.0f;
-        break;
-
-        default:
-            // Not a supported rate
-            *wrap = 0;
-            ret = false;
-        break;
-    }
-
-    // mid point is half of wrap value
-    *mid_point = *wrap >> 1;
-
-    return ret;
-}
-
 int main(void) 
 {
     // Overclock to 180MHz so that system clock is a multiple of typical
@@ -401,8 +295,10 @@ int main(void)
     fsInitialise(&mount);
     fsMount(&mount);
 
-    // Start by playing brown noise
-    changeState(file_1);
+    // Get the initial states
+    sound_state new_state;
+    configGetStatus(&mount, &new_state, &volume, &rgb);
+    changeState(new_state);
 
     /*
      * Main loop Generate noise, handle buttons for volume, parse wav blocks etc
@@ -416,10 +312,12 @@ int main(void)
         {
             case increase:
                 volume = fminf(1.0, volume+0.1);
+                configSetVolume(&mount, volume);
             break;
 
             case decrease:
                 volume = fmaxf(0.0, volume-0.1);
+                configSetVolume(&mount, volume);
             break;
 
             case populate_dma:
@@ -500,6 +398,9 @@ static void changeState(enum sound_state new_state)
     // State needs to be changed before buffers populated
     current_state = new_state;
 
+    // Store the state
+    configSetSoundState(&mount, current_state);
+
     // Now in a position to start playing the sound
     uint32_t sample_rate;
 
@@ -519,9 +420,9 @@ static void changeState(enum sound_state new_state)
 
 void startMusic(uint32_t sample_rate)
 {
-    // Empty the message queue, to avoid processing populate messages
+    
     enum Event skip = empty;
-    while(queue_try_remove(&eventQueue, &skip));
+    int count = 0;
 
     // Reconfigure the PWM for the new wrap and clock
     getSampleValues(sample_rate, &repeat_shift, &wrap, &mid_point, &fraction);
@@ -536,6 +437,10 @@ void startMusic(uint32_t sample_rate)
 
     // Populate the DMA buffers
     populateDmaBuffer();
+
+    // Empty the message queue, to avoid processing populate messages
+    while(queue_try_remove(&eventQueue, &skip));
+
     populateDmaBuffer();
 
     // Start the first DMA channel in the chain and both PWMs
@@ -555,10 +460,11 @@ void stopMusic(void)
 {
     // Disable DMAs and PWMs
     pwmChannelStop(&pwm_channel[0]);
-    pwmChannelStop(&pwm_channel[1]);
-
     dma_channel_abort(dma_channel[0]);
+    pwmChannelStop(&pwm_channel[1]);
     dma_channel_abort(dma_channel[1]);
+    pwmChannelStop(&pwm_channel[0]);
+    dma_channel_abort(dma_channel[0]);
 }
 
 void exitMusic(void)
@@ -640,6 +546,7 @@ void buttonCallback(uint gpio_number, enum debounce_event event)
 
     switch (gpio_number)
     {
+        case 14:
         case 20:
             e = change;
         break;
@@ -652,12 +559,11 @@ void buttonCallback(uint gpio_number, enum debounce_event event)
             e = decrease;
         break;
 
-        case 14:
 #else
         case 22:
-#endif        
             e = quit;
         break;
+#endif        
     }
     queue_try_add(&eventQueue, &e);
 }

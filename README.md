@@ -52,9 +52,11 @@ By default it is assumed that the speakers attached to the audio jack will have 
 ### Debug
 PWM is not disabled when a break point is reached. With the code disabled the interrupt routine to reconfigure the DMA will not execute, resulting in random sound being generated.  
 If volume control is not enabled, the button attached to `GP22` can be used to disable the PWM to avoid the noise generation. If volume control is enabled then a button can be attached to `GP14` for debug purposes.
+
+## State storage
+The volume and play state is stored on the sd card, and restored when the device is restarted.
 ### Next steps
-1. Store the state, so that, when switched on, the player will start with the previously playing sound  
-2. Configure the RGB LED on the Maker board, so that it can be used as a night light. Control using the button connected to `GP21`
+1. Configure the RGB LED on the Maker board, so that it can be used as a night light. When not in volume mode, configure control using the button connected to `GP21`
 
 
 

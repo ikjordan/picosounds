@@ -32,6 +32,7 @@ add_executable(picosounds picosounds.c
                           colour_noise.c
                           hw_config.c
                           fs_mount.c
+                          config.c
                           ./picomp3lib/interface/music_file.c
                )
 
@@ -42,7 +43,6 @@ pico_enable_stdio_uart(picosounds 1)
 pico_enable_stdio_usb(picosounds 0)
 
 add_subdirectory(no-OS-FatFS-SD-SPI-RPi-Pico/FatFs_SPI build)
-remove_definitions(-DNO_PICO_LED)
 
 add_subdirectory(picomp3lib/src)
 
