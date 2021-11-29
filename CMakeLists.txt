@@ -21,6 +21,7 @@ set(PICO_CXX_ENABLE_RTTI 1)
 # Initialise the Pico SDK
 pico_sdk_init()
 
+
 # Turn off the FatFS LED
 add_definitions(-DNO_PICO_LED)
 
@@ -36,6 +37,7 @@ add_executable(picosounds picosounds.c
                           ./picomp3lib/interface/music_file.c
                )
 
+pico_generate_pio_header(picosounds ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
 pico_set_program_name(picosounds "picosounds")
 pico_set_program_version(picosounds "0.1")
 

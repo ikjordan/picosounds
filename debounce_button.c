@@ -47,11 +47,12 @@ void debounceButtonDestroy(debounce_button_data* db)
     // Kill any timer
     if (db->timer_id != -1)
     {
-        // Timer not running so create one
+        // Cancel a timer if it was running
         cancel_alarm(db->timer_id);
+        db->timer_id = -1;
     }
 
-    // Remove from linked list
+    // Remove from linked list - strictly speaking this should be interrupt protected
 
     // Is this the head?
     if (debounce_list == db)
@@ -98,7 +99,8 @@ static void debounceButtonCallback(uint gpio, uint32_t events)
 static int64_t debounceButtonTimerCallback(alarm_id_t id, void* db) 
 {
     // Is the button pressed?
-    if (gpio_get(((debounce_button_data*)db)->pin) == ((debounce_button_data*)db)->high)
+    if ((((debounce_button_data*)db)->timer_id != -1) && 
+          (gpio_get(((debounce_button_data*)db)->pin) == ((debounce_button_data*)db)->high))
     {
         ((debounce_button_data*)db)->event_callback(((debounce_button_data*)db)->pin, single_press);
     }

@@ -6,7 +6,7 @@ static void configCreateInitialFile(void);
 
 FIL fp;
 
-void configGetStatus(fs_mount* fs, sound_state* sound, float* volume, uint32_t* rgb)
+void configGetStatus(fs_mount* fs, sound_state* sound, float* volume, led_state* led, float* intensity)
 {
     UINT read;
     bool failed = false;
@@ -20,7 +20,8 @@ void configGetStatus(fs_mount* fs, sound_state* sound, float* volume, uint32_t* 
 
             *sound = CONFIG_INITIAL_SOUND;
             *volume = CONFIG_INITIAL_VOLUME;
-            *rgb = CONFIG_INITIAL_RGB;
+            *led = CONFIG_INITIAL_LED;
+            *intensity = CONFIG_INITIAL_INTENSITY;
         }
         else
         {
@@ -38,10 +39,17 @@ void configGetStatus(fs_mount* fs, sound_state* sound, float* volume, uint32_t* 
                 *volume = CONFIG_INITIAL_VOLUME;
             }
 
-            if (failed || (f_read(&fp, rgb, sizeof(uint32_t), &read) != FR_OK) || (read != sizeof(uint32_t)))
+            if (failed || (f_read(&fp, led, sizeof(led_state), &read) != FR_OK) || (read != sizeof(led_state)))
             {
-                printf("cannot read rgb\n");
-                *rgb = CONFIG_INITIAL_RGB;
+                printf("cannot read LED\n");
+                failed = true;
+                *led = CONFIG_INITIAL_LED;
+            }
+
+            if (failed || (f_read(&fp, intensity, sizeof(float), &read) != FR_OK) || (read != sizeof(intensity)))
+            {
+                printf("cannot read intensity\n");
+                *intensity = CONFIG_INITIAL_INTENSITY;
             }
             f_close(&fp);
         }
@@ -50,7 +58,8 @@ void configGetStatus(fs_mount* fs, sound_state* sound, float* volume, uint32_t* 
     {
         *sound = CONFIG_INITIAL_SOUND;
         *volume = CONFIG_INITIAL_VOLUME;
-        *rgb = CONFIG_INITIAL_RGB;
+        *led = CONFIG_INITIAL_LED;
+        *intensity = CONFIG_INITIAL_INTENSITY;
     }
 }
 
@@ -125,7 +134,7 @@ bool configSetVolume(fs_mount* fs, float volume)
     return ret;
 }
 
-bool configSetRGB(fs_mount* fs, uint32_t rgb)
+bool configSetLed(fs_mount* fs, led_state led)
 {
     bool ret = false;
 
@@ -137,9 +146,9 @@ bool configSetRGB(fs_mount* fs, uint32_t rgb)
         {
             if (f_lseek(&fp, sizeof(sound_state) + sizeof(float)) == FR_OK)
             {
-                if ((f_write(&fp, &rgb, sizeof(rgb), &write) != FR_OK) || write != sizeof(rgb))
+                if ((f_write(&fp, &led, sizeof(led), &write) != FR_OK) || write != sizeof(led))
                 {
-                    printf("cannot write rgb\n");
+                    printf("cannot write led\n");
                 }
                 else
                 {
@@ -148,7 +157,46 @@ bool configSetRGB(fs_mount* fs, uint32_t rgb)
             }
             else
             {
-                printf("Cannot seek to rgb\n");
+                printf("Cannot seek to led\n");
+            }
+            
+            if (f_close(&fp) != FR_OK)
+            {
+                printf("Failed to close file\n");
+            }
+        }
+        else
+        {
+            printf("fopen failed\n");
+        }
+    }
+    return ret;
+}
+
+bool configSetIntensity(fs_mount* fs, float intensity)
+{
+    bool ret = false;
+
+    if (fsMounted(fs))
+    {
+        UINT write;
+
+        if (f_open(&fp, CONFIG_FILENAME, FA_OPEN_ALWAYS | FA_WRITE) == FR_OK)
+        {
+            if (f_lseek(&fp, sizeof(sound_state) + sizeof(float) + sizeof(led_state)) == FR_OK)
+            {
+                if ((f_write(&fp, &intensity, sizeof(intensity), &write) != FR_OK) || write != sizeof(intensity))
+                {
+                    printf("cannot write intensity\n");
+                }
+                else
+                {
+                    ret = true;
+                }
+            }
+            else
+            {
+                printf("Cannot seek to intensity\n");
             }
             
             if (f_close(&fp) != FR_OK)
@@ -176,7 +224,8 @@ static void configCreateInitialFile(void)
     {
         sound_state s = CONFIG_INITIAL_SOUND;
         float f = CONFIG_INITIAL_VOLUME;
-        uint32_t c = CONFIG_INITIAL_RGB;
+        uint32_t l = CONFIG_INITIAL_LED;
+        float i = CONFIG_INITIAL_INTENSITY;
         UINT write;
         bool failed = false;
 
@@ -192,9 +241,15 @@ static void configCreateInitialFile(void)
             failed = true;
         }
 
-        if (failed || (f_write(&fp, &c, sizeof(c), &write) != FR_OK) || (write != sizeof(c)))
+        if (failed || (f_write(&fp, &l, sizeof(l), &write) != FR_OK) || (write != sizeof(l)))
         {
-            printf("Cannot write colour config\n");
+            printf("Cannot write LED config\n");
+            failed = true;
+        }
+
+        if (failed || (f_write(&fp, &i, sizeof(i), &write) != FR_OK) || (write != sizeof(i)))
+        {
+            printf("Cannot write intensity config\n");
             failed = true;
         }
 

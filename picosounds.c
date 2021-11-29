@@ -4,7 +4,9 @@
 #include "hardware/irq.h"  // interrupts
 #include "hardware/dma.h"  // dma 
 #include "hardware/sync.h" // wait for interrupt 
+#include "hardware/structs/ioqspi.h"
 #include "pico/util/queue.h" 
+#include "ws2812.pio.h"
 
 #include "fs_mount.h"
 #include "pwm_channel.h"
@@ -14,10 +16,24 @@
 #include "music_file.h"
 #include "config.h"
 
+#ifdef DEBUG_STATUS
+  #define STATUS(a) printf a
+#else
+  #define STATUS(a) (void)0
+#endif
  
 #define AUDIO_PIN 18  // Configured for the Maker board 18 left, 19 right
 #define STEREO        // When stereo not enabled, DMA same l and r data to both channels
-//#define VOLUME
+#define VOLUME
+
+#define IS_RGBW false
+#define NUM_PIXELS 1
+
+#ifdef PICO_DEFAULT_WS2812_PIN
+#define WS2812_PIN PICO_DEFAULT_WS2812_PIN
+#else
+#define WS2812_PIN 28       // Maker board
+#endif
 
 #ifdef STEREO
 bool play_stereo = true;
@@ -25,9 +41,9 @@ bool play_stereo = true;
 bool play_stereo = false;
 #endif
 
-static colour_noise cn[2];
+static colour_noise cn[2];          // Colour noise structures for left and right channels
 
-#define SAMPLE_RATE 22000
+#define SAMPLE_RATE 22000           // Used for coloured noise generation
 #define DMA_BUFFER_LENGTH 2200      // 2200 samples @ 44kHz gives= 0.05 seconds = interrupt rate
 
 #define RAM_BUFFER_LENGTH (4*DMA_BUFFER_LENGTH)
@@ -73,30 +89,47 @@ static float volume = 0.8;                  // Initial volume adjust, controlled
 static queue_t eventQueue;
 
 // Supported events
-enum Event 
+typedef enum Event 
 {
     empty = 0,
-    increase = empty + 1, 
-    decrease = increase + 1,
-    populate_dma = decrease + 1,
+    increase_volume = empty + 1, 
+    decrease_volume = increase_volume + 1,
+    populate_dma = decrease_volume + 1,
     populate_double = populate_dma + 1,
-    change = populate_double + 1,
-    quit = change + 1, 
-}; 
+    change_music = populate_double + 1,
+    increase_intensity = change_music + 1, 
+    decrease_intensity = increase_intensity + 1,
+    change_led = decrease_intensity + 1,
+    quit = change_led + 1, 
+} Event; 
 
 // To convert from 16 bit signed to unsigned
 #define MID_VALUE 0x8000
 
 // Helper to determine if state is a colour state
-static inline bool isColour(enum sound_state state) {return (state == white || state == pink || state == brown);}
-static inline bool isFile(enum sound_state state) {return (state == file_1 || state == file_2 || state == file_3);}
+static inline bool isColour(sound_state state) {return (state == white || state == pink || state == brown);}
+static inline bool isFile(sound_state state) {return (state == file_1 || state == file_2 || state == file_3);}
 
-static void changeState(enum sound_state new_state);
+static void changeState(sound_state new_state);
 sound_state current_state = off; 
-uint32_t rgb = 0x0;
 
-// Four buttons
-static debounce_button_data button[4];
+// RGB values for 5 colours (black, red, orange, yellow, white)
+static const uint8_t rgb_colours[5][3] = { {0,0,0}, {255,0,0,}, {255,64,0,}, {255,255,0,}, {255,255,255,} }; 
+
+static led_state led = led_black;   // Initially LED is not illuminated
+static float intensity = 1.0f;
+
+// GPIO for Maker buttons, plus extra off board debug
+enum Buttons
+{
+    button_change = 20,
+    button_increase = 21,
+    button_decrease = 22,
+    button_debug_change = 6,
+    button_debug_quit = 7,
+};
+
+static debounce_button_data button[5];
 
 /* 
  * Function declarations
@@ -110,7 +143,11 @@ void startMusic(uint32_t sample_rate);
 void stopMusic();
 void exitMusic();
 
-void buttonCallback(uint gpio_number, enum debounce_event event);
+static inline uint32_t urgb_u32(uint8_t r, uint8_t g, uint8_t b);
+static void set_pixel(PIO pio, led_state led, float intensity);
+bool __no_inline_not_in_flash_func(getBootselButton)(void);
+
+void buttonCallback(uint gpio_number, debounce_event event);
 
 static bool loadFile(const char* filename);
 static fs_mount mount;
@@ -137,7 +174,7 @@ static void dmaInterruptHandler()
             dma_channel_set_read_addr(dma_channel[i], dma_buffer[i], false);
 
             // Populate buffer outside of IRQ
-            enum Event e = populate_dma;
+            Event e = populate_dma;
             queue_try_add(&eventQueue, &e);
         }
     }    
@@ -198,7 +235,7 @@ static void populateDmaBuffer(void)
             ram_buffer_index = 0;
 
             // Signal to populate a new RAM buffer
-            enum Event e = populate_double;
+            Event e = populate_double;
             queue_try_add(&eventQueue, &e);
         }
     }
@@ -237,13 +274,17 @@ int main(void)
 {
     // Overclock to 180MHz so that system clock is a multiple of typical
     // audio sampling rates
-    if (!set_sys_clock_khz(180000, true))
-    {
-        panic("Cannot set clock rate\n");
-    }   
+    bool clock_set = set_sys_clock_khz(180000, true);
     
-    // Adjust frequency before initialiing, so serial port will work
+    // Adjust frequency before initialising, so serial port will work
     stdio_init_all();
+
+    // Now stdio is available, check the frequency was set
+    if (!clock_set)
+    {
+        printf("Cannot set clock rate\n");
+        return -1;
+    }   
 
     // Set up the PWMs with arbiraty values, will be updates when play starts
     pwmChannelInit(&pwm_channel[0], AUDIO_PIN);
@@ -271,16 +312,17 @@ int main(void)
     irq_set_enabled(DMA_IRQ_1, true);
 
     // Initialise the buttons
-    debounceButtonCreate(&button[0], 20, 40, buttonCallback, true, false);
-    debounceButtonCreate(&button[1], 21, 40, buttonCallback, true, false);
-    debounceButtonCreate(&button[2], 22, 40, buttonCallback, true, false);
+    debounceButtonCreate(&button[0], button_change, 40, buttonCallback, true, false);
+    debounceButtonCreate(&button[1], button_increase, 40, buttonCallback, true, false);
+    debounceButtonCreate(&button[2], button_decrease, 40, buttonCallback, true, false);
     
-    // Extra off board button used for development testing
-    debounceButtonCreate(&button[3], 14, 40, buttonCallback, false, true);
+    // Extra off board buttons used for development testing
+    debounceButtonCreate(&button[3], button_debug_change, 40, buttonCallback, false, true);
+    debounceButtonCreate(&button[4], button_debug_quit, 40, buttonCallback, false, true);
 
     // Create the event queue
-    enum Event event = empty;
-    queue_init(&eventQueue, sizeof(event), 4);
+    Event event = empty;
+    queue_init(&eventQueue, sizeof(event), 6);
 
     // Set up noise buffer
     colourNoiseCreate(&cn[0], 0.5);
@@ -295,29 +337,62 @@ int main(void)
     fsInitialise(&mount);
     fsMount(&mount);
 
+    // Initialise the PIO
+    PIO pio = pio0;
+    int sm = 0;
+    uint offset = pio_add_program(pio, &ws2812_program);
+    ws2812_program_init(pio, sm, offset, WS2812_PIN, 800000, IS_RGBW);
+
     // Get the initial states
     sound_state new_state;
-    configGetStatus(&mount, &new_state, &volume, &rgb);
+    configGetStatus(&mount, &new_state, &volume, &led, &intensity);
+    
+    // Use the initial states
     changeState(new_state);
+    set_pixel(pio, led, intensity);
 
     /*
-     * Main loop Generate noise, handle buttons for volume, parse wav blocks etc
+     * Main loop 
      */
-    // Process events
     while (true)
     {
         queue_remove_blocking(&eventQueue, &event);
         
         switch (event)
         {
-            case increase:
+            case change_music:
+                changeState(current_state + 1);
+            break;
+
+            case change_led:
+                if (++led == led_wrap)
+                {
+                    led = led_start;
+                }
+                set_pixel(pio, led, intensity);
+                configSetLed(&mount, led);
+            break;
+
+            case increase_volume:
                 volume = fminf(1.0, volume+0.1);
                 configSetVolume(&mount, volume);
             break;
 
-            case decrease:
+            case decrease_volume:
                 volume = fmaxf(0.0, volume-0.1);
                 configSetVolume(&mount, volume);
+            break;
+
+            case increase_intensity:
+                intensity = fminf(1.0, intensity+0.1);
+                set_pixel(pio, led, intensity);
+                configSetIntensity(&mount, intensity);
+            break;
+
+            case decrease_intensity:
+                intensity = fmaxf(0.0, intensity-0.1);
+                set_pixel(pio, led, intensity);
+                configSetIntensity(&mount, intensity);
             break;
 
             case populate_dma:
@@ -326,10 +401,6 @@ int main(void)
 
             case populate_double:
                 doubleBufferPopulateNext(&double_buffers);
-            break;
-
-            case change:
-                changeState(current_state + 1);
             break;
 
             case quit:
@@ -344,7 +415,7 @@ int main(void)
     return 0;
 }
 
-static void changeState(enum sound_state new_state)
+static void changeState(sound_state new_state)
 {
     // Handle wrap
     if (new_state == end)
@@ -389,7 +460,7 @@ static void changeState(enum sound_state new_state)
         }
     }
 
-    // Handle the case where noise is not supported
+    // Handle the case where failure to open a file results in a wrap
     if (new_state == end)
     {
         new_state = start;
@@ -411,7 +482,7 @@ static void changeState(enum sound_state new_state)
     }
     else if (isFile(current_state))
     {
-        printf("Sample rate is %u\n", mf.sample_rate);
+        STATUS(("Sample rate is %u\n", mf.sample_rate));
         sample_rate = musicFileGetSampleRate(&mf);
         sampled_stereo = musicFileIsStereo(&mf);
     }
@@ -420,7 +491,7 @@ static void changeState(enum sound_state new_state)
 
 void startMusic(uint32_t sample_rate)
 { 
-    enum Event skip = empty;
+    Event skip = empty;
 
     // Reconfigure the PWM for the new wrap and clock
     getSampleValues(sample_rate, &repeat_shift, &wrap, &mid_point, &fraction);
@@ -460,10 +531,10 @@ void stopMusic(void)
 {
     // Disable DMAs and PWMs
     pwmChannelStop(&pwm_channel[0]);
-    dma_channel_abort(dma_channel[0]);
     pwmChannelStop(&pwm_channel[1]);
-    dma_channel_abort(dma_channel[1]);
     pwmChannelStop(&pwm_channel[0]);
+    dma_channel_abort(dma_channel[0]);
+    dma_channel_abort(dma_channel[1]);
     dma_channel_abort(dma_channel[0]);
 }
 
@@ -475,11 +546,46 @@ void exitMusic(void)
     current_state = off;
 }
 
+/*
+ * urgb_u32
+ *
+ * r, g , b     Colour channel intensity
+ * 
+ * Return a 32 bit rgb value for writing to the PIO FIFO
+ */
+static inline uint32_t urgb_u32(uint8_t r, uint8_t g, uint8_t b) 
+{
+    return
+            ((uint32_t) (r) << 8) |
+            ((uint32_t) (g) << 16) |
+            (uint32_t) (b);
+}
 
-// Write 16 bit stereo sound data to to the supplied buffer
-// callback function called from circular buffer class
-// len is max number of 16 bit samples to copy
-// Returns the number of 16 bit samples actually copied
+/*
+ * set_pixel
+ * 
+ * led          Colour id
+ * intensity    Ranges from 0 (black) to 1 (full colour)
+ * 
+ */ 
+static void set_pixel(PIO pio, led_state led, float intensity)
+{
+    STATUS(("set_pixel: led = %u intensity = %f\n", led, intensity));
+    
+    pio_sm_put_blocking(pio0, 0, urgb_u32(rgb_colours[led][0] * intensity, 
+                                          rgb_colours[led][1] * intensity, 
+                                          rgb_colours[led][2] * intensity) << 8u);
+}
+
+/*
+ * populateCallback
+ * buffer       Pointer to buffer to populate
+ * len          Max number of 16 bit samples to copy into buffer
+ * 
+ * Write 16 bit stereo sound data to to the supplied buffer
+ * callback function called from circular buffer class
+ * 
+ */
 uint32_t populateCallback(int16_t* buffer, uint32_t len)
 {
     uint32_t written = len;
@@ -521,6 +627,13 @@ uint32_t populateCallback(int16_t* buffer, uint32_t len)
     return written;
 }
 
+/*
+ * loadFile
+ * filename     String containing name of music file to open
+ * 
+ * Returns true if music file was successfully opened and header read
+ * 
+ */
 static bool loadFile(const char* filename)
 {
     bool success = false;
@@ -540,31 +653,74 @@ static bool loadFile(const char* filename)
 }
 
 // Called when a button is pressed
-void buttonCallback(uint gpio_number, enum debounce_event event)
+void buttonCallback(uint gpio_number, debounce_event event)
 {
-    enum Event e = empty;
+    Event e = empty;
+    bool sel = getBootselButton();
 
     switch (gpio_number)
     {
-        case 14:
-        case 20:
-            e = change;
+        case button_change:
+        case button_debug_change:
+            e = sel ? change_led : change_music;
         break;
-#ifdef VOLUME
-        case 21:
-            e = increase;
-        break;
-
-        case 22:
-            e = decrease;
-        break;
-
+        case button_increase:
+#ifdef VOLUME        
+            e = sel ? increase_intensity : increase_volume;
 #else
-        case 22:
+            e = increase_intensity
+#endif
+        break;
+
+        case button_decrease:
+#ifdef VOLUME        
+            e = sel ? decrease_intensity : decrease_volume;
+#else
+            e = decrease_intensity
+#endif
+        break;
+
+        case button_debug_quit:
             e = quit;
         break;
-#endif        
     }
     queue_try_add(&eventQueue, &e);
+}
+
+/*
+ * getBootselButton
+ *
+ * Check if boot select button is pressed
+ * 
+ */ 
+bool __no_inline_not_in_flash_func(getBootselButton)(void) 
+{
+    const uint CS_PIN_INDEX = 1;
+
+    // Must disable interrupts, as interrupt handlers may be in flash, and we
+    // are about to temporarily disable flash access!
+    uint32_t flags = save_and_disable_interrupts();
+
+    // Set chip select to Hi-Z
+    hw_write_masked(&ioqspi_hw->io[CS_PIN_INDEX].ctrl,
+                    GPIO_OVERRIDE_LOW << IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_LSB,
+                    IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_BITS);
+
+    // Note we can't call into any sleep functions in flash right now
+    for (volatile int i = 0; i < 1000; ++i);
+
+    // The HI GPIO registers in SIO can observe and control the 6 QSPI pins.
+    // Note the button pulls the pin *low* when pressed.
+    bool button_state = !(sio_hw->gpio_hi_in & (1u << CS_PIN_INDEX));
+
+    // Need to restore the state of chip select, else we are going to have a
+    // bad time when we return to code in flash!
+    hw_write_masked(&ioqspi_hw->io[CS_PIN_INDEX].ctrl,
+                    GPIO_OVERRIDE_NORMAL << IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_LSB,
+                    IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_BITS);
+
+    restore_interrupts(flags);
+
+    return button_state;
 }
 
