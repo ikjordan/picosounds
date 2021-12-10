@@ -668,7 +668,7 @@ void buttonCallback(uint gpio_number, debounce_event event)
 #ifdef VOLUME        
             e = sel ? increase_intensity : increase_volume;
 #else
-            e = increase_intensity
+            e = increase_intensity;
 #endif
         break;
 
@@ -676,7 +676,7 @@ void buttonCallback(uint gpio_number, debounce_event event)
 #ifdef VOLUME        
             e = sel ? decrease_intensity : decrease_volume;
 #else
-            e = decrease_intensity
+            e = decrease_intensity;
 #endif
         break;
 
