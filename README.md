@@ -62,3 +62,12 @@ The code is configured so that an off-board button connected to `GP7` can be use
 
 ### State storage
 The volume and play state is stored on the sd card, and restored when the device is restarted.
+
+## To Build
+`git clone https://github.com/ikjordan/picosounds.git`  
+`cd picosounds`   
+`git submodule update --init`  
+`mkdir build`  
+`cd build`  
+`cmake ..`  
+`make`
