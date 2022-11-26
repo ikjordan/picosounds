@@ -78,7 +78,7 @@ uint32_t populateCallback(int16_t* buffer, uint32_t len);   // Call back to gene
 #define CACHE_BUFFER 8000
 unsigned char cache_buffer[CACHE_BUFFER];
 
-// Pointer to the currenly in use RAM buffer
+// Pointer to the currently in use RAM buffer
 static const int16_t* current_RAM_Buffer = 0;
 static int ram_buffer_index = 0;            // Holds current position in ram_buffers for channels
 static uint32_t current_RAM_length = 0;     // number of active samples in current RAM buffer
@@ -286,7 +286,7 @@ int main(void)
         return -1;
     }   
 
-    // Set up the PWMs with arbiraty values, will be updates when play starts
+    // Set up the PWMs with arbitrary values, will be updated when play starts
     pwmChannelInit(&pwm_channel[0], AUDIO_PIN);
     pwmChannelInit(&pwm_channel[1], AUDIO_PIN+1);
 
@@ -502,7 +502,7 @@ void startMusic(uint32_t sample_rate)
     ram_buffer_index = 0;
     dma_buffer_index = 0;
 
-    // Reininitialise the double buffers
+    // Reinitialise the double buffers
     doubleBufferInitialise(&double_buffers, &populateCallback, &current_RAM_Buffer, &current_RAM_length);
 
     // Populate the first DMA buffer

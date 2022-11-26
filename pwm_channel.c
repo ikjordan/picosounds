@@ -23,7 +23,7 @@ void pwmChannelReconfigure(pwm_data* data, float clk_div, uint16_t wrap)
 
 }
 
-// Set the first value inthe pwm
+// Set the first value in the pwm
 void pwmChannelSetFirstValue(pwm_data* data, uint16_t value)
 {
     pwm_set_chan_level(data->pin_slice, pwm_gpio_to_channel(data->gpio_number), value);
