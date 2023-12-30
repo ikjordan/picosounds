@@ -3,7 +3,7 @@ Loops mp3 and wav files, also generates coloured noise. A WS2812 LED can be conf
 
 ## For use at night
 
-The aim of this project is to use the Cytron Maker Pico board https://github.com/CytronTechnologies/MAKER-PI-PICO to create a noise generator that can be used at night, to aid sleep.
+The aim of this project is to use the [Cytron Maker Pico board](https://github.com/CytronTechnologies/MAKER-PI-PICO) to create a noise generator that can be used at night, to aid sleep.
 
 It is also an opportunity to demonstrate some of the features on the board. These include:
 #### SD Card Reader  
@@ -25,9 +25,42 @@ The player will look for and play files named `1`, `2` and `3` in the root direc
 **Note:** there should be no extension in the filename, the filename should consist of only a single digit in the range 1 to 3.
 
 ### Useful files to aid sleep
-A selection of files to aid sleep can be found at:
-https://archive.org/details/relaxingsounds/
-### Supported sampling rates
+A selection of files to aid sleep can be found [here](https://archive.org/details/relaxingsounds/)
+
+## Volume Control
+By default the volume level at the jack can be varied by use of the buttons connected to `GP21` and `GP22`. If the attached speakers have volume control then removing the definition of `VOLUME` in `picosounds.c` will lock the volume at 100%.  
+If this is done the intensity of the LED can be varied using the buttons connected to `GP21` and `GP22` without pressing the PICO boot select button.
+
+# Developer Notes
+## To Build
+Install the Pico SDK. This is described in the [Getting Started Guide](https://datasheets.raspberrypi.com/pico/getting-started-with-pico.pdf)
+
+
+`git clone --recursive https://github.com/ikjordan/picosounds.git`  
+`cd picosounds`   
+`mkdir build`  
+`cd build`  
+`cmake ..`  
+`make`
+
+## Debug
+PWM is not disabled when a break point is reached. With the code stopped in the debugger, the interrupt routine to reconfigure the DMA will not execute, resulting in random sound being generated.  
+The code is configured so that an off-board button connected to `GP7` can be used to disable the PWM to avoid the noise generation.  
+
+Two debug configurations are included in `launch.json'`  
+### 1. Debug Probe
+For use with the [Raspberry Pi Debug Probe](https://www.raspberrypi.com/products/debug-probe/)
+### 2. Pi
+For use with Raspberry Pi4 or earlier, with SWD connected through GPIO 24 and 25
+## Sub module usage
+The code uses two submodules:  
+1. FatFS:   https://github.com/carlk3/no-OS-FatFS-SD-SPI-RPi-Pico  
+2. Mp3:     https://github.com/ikjordan/picomp3lib
+
+## State storage
+The volume and play state is stored on the sd card, and restored when the device is restarted.
+
+## Supported sampling rates
 The following sampling rates are supported:  
 8000 kHz  
 11000 kHz  
@@ -44,30 +77,5 @@ The following sampling rates are supported:
 
 MP3 ABR and CBR is supported, with bit rates up to 320kBit/s.
 
-### PWM Generation
+## PWM Generation
 Sound is played with 12 bit accuracy. To support this at up to 48kHz sampling rates, the pico is overclocked to 180MHz
-
-### Sub module usage
-The code uses two submodules:  
-1. FatFS:   https://github.com/carlk3/no-OS-FatFS-SD-SPI-RPi-Pico  
-2. Mp3:     https://github.com/ikjordan/picomp3lib
-
-## Volume Control
-By default the volume level at the jack can be varied by use of the buttons connected to `GP21` and `GP22`. If the attached speakers have volume control then removing the definition of `VOLUME` in `picosounds.c` will lock the volume at 100%.  
-If this is done the intensity of the LED can be varied using the buttons connected to `GP21` and `GP22` without pressing the PICO boot select button.
-
-### Debug
-PWM is not disabled when a break point is reached. With the code stopped in the debugger, the interrupt routine to reconfigure the DMA will not execute, resulting in random sound being generated.  
-The code is configured so that an off-board button connected to `GP7` can be used to disable the PWM to avoid the noise generation. 
-
-### State storage
-The volume and play state is stored on the sd card, and restored when the device is restarted.
-
-## To Build
-`git clone https://github.com/ikjordan/picosounds.git`  
-`cd picosounds`   
-`git submodule update --init`  
-`mkdir build`  
-`cd build`  
-`cmake ..`  
-`make`
